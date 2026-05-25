@@ -493,6 +493,17 @@ function AppInner({
   useEffect(() => {
     if (!isStreaming && liveExpand) setLiveExpand(false);
   }, [isStreaming, liveExpand]);
+  // Seed costDisplayCurrency into state so reactive components respond to the toggle.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
+  useEffect(() => {
+    const cfg = readConfig();
+    if (cfg.costCurrency) {
+      agentStore.dispatch({
+        type: "session.update",
+        patch: { costDisplayCurrency: cfg.costCurrency },
+      });
+    }
+  }, []);
   // ctrl-r toggles verbose mode — ReasoningCard / ToolCard skip elision while on.
   // Survives turn boundaries; resets on session restart.
   const [verboseMode, setVerboseMode] = useState(false);
