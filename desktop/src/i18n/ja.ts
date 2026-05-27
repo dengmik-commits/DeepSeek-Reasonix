@@ -692,6 +692,8 @@ export const ja = {
     unknownKind: "# 不明なカードタイプ — フォールバック表示",
   },
   thread: {
+    toolCalls: "{count} ツール呼び出し",
+    oneToolCall: "1 ツール呼び出し",
     keepSteps: "残り {n} ステップを保持",
     keepOriginal: "オリジナルを保持",
     you: "あなた",
