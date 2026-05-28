@@ -2696,7 +2696,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const cfg = readConfig();
           cfg.recentWorkspaces = msg.recentWorkspaces;
           writeConfig(cfg);
-          process.stderr.write(`[desktop] saved recentWorkspaces: ${JSON.stringify(msg.recentWorkspaces)}\n`);
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
         if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
