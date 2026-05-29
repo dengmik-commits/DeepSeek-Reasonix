@@ -2365,7 +2365,7 @@ function TabRuntime({
 
   return (
     <WorkspaceProvider
-      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor }}
+      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor, sessionFiles: state.sessionFiles }}
     >
       <div
         className="app"
