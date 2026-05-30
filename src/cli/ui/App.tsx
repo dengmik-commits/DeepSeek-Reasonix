@@ -918,8 +918,7 @@ function AppInner({
     stagedInput ||
     pendingCheckpoint ||
     pendingRevision ||
-    pendingReviseEditor ||
-    (planStepsRef.current && planStepsRef.current.length > 0 && !planMode)
+    pendingReviseEditor
   );
   // Wall-clock when the latest tool_start fired. Cleared when the
   // matching `tool` event arrives (or at turn end). Tools are
