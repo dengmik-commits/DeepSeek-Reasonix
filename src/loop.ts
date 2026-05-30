@@ -1153,9 +1153,6 @@ export class CacheFirstLoop {
       }
 
       if (repairedCalls.length === 0) {
-        if (this._steerQueue.length > 0) {
-          continue;
-        }
         if (allSuppressed) {
           try {
             yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
@@ -1164,6 +1161,9 @@ export class CacheFirstLoop {
             this._steerQueue.length = 0;
           }
           return;
+        }
+        if (this._steerQueue.length > 0) {
+          continue;
         }
         restoreModelIfNeeded();
         yield { turn: this._turn, role: "done", content: assistantContent };
