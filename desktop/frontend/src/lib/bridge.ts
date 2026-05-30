@@ -13,7 +13,10 @@ import type {
   MemoryView,
   Meta,
   ModelInfo,
+  ProviderView,
   QuestionAnswer,
+  SessionMeta,
+  SettingsView,
   WireEvent,
 } from "./types";
 
@@ -28,6 +31,15 @@ export interface AppBindings {
   Compact(): Promise<void>;
   NewSession(): Promise<void>;
   History(): Promise<HistoryMessage[]>;
+  // Session history: list saved sessions, resume one (returns its transcript),
+  // delete one, or give one a custom display name ("" clears it).
+  ListSessions(): Promise<SessionMeta[]>;
+  ResumeSession(path: string): Promise<HistoryMessage[]>;
+  DeleteSession(path: string): Promise<void>;
+  RenameSession(path: string, title: string): Promise<void>;
+  // Workspace: open a folder chooser and switch to that project (fresh session);
+  // returns the chosen path, or "" if cancelled.
+  PickWorkspace(): Promise<string>;
   ContextUsage(): Promise<ContextInfo>;
   Meta(): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
@@ -40,6 +52,20 @@ export interface AppBindings {
   Memory(): Promise<MemoryView>;
   Remember(scope: string, note: string): Promise<string>;
   SaveDoc(path: string, body: string): Promise<string>;
+  // Settings panel: read the resolved config and apply edits (each writes config
+  // and rebuilds the controller live). Secrets go through SetProviderKey (→ .env).
+  Settings(): Promise<SettingsView>;
+  SetDefaultModel(ref: string): Promise<void>;
+  SetPlannerModel(ref: string): Promise<void>;
+  SaveProvider(p: ProviderView): Promise<void>;
+  DeleteProvider(name: string): Promise<void>;
+  SetProviderKey(apiKeyEnv: string, value: string): Promise<void>;
+  SetPermissionMode(mode: string): Promise<void>;
+  AddPermissionRule(list: string, rule: string): Promise<void>;
+  RemovePermissionRule(list: string, rule: string): Promise<void>;
+  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]): Promise<void>;
+  SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string): Promise<void>;
+  SetLanguage(lang: string): Promise<void>;
 }
 
 interface WailsRuntime {
@@ -121,6 +147,30 @@ function delay(ms: number): Promise<void> {
 
 function makeMockApp(): AppBindings {
   let cancelled = false;
+  let cwd = "~/projects/reasonix"; // mutable so PickWorkspace is visible in dev
+  const day = 86_400_000;
+  const t0 = Date.now();
+  // Mutable so delete/rename are observable in browser dev.
+  const sessions: SessionMeta[] = [
+    { path: "/mock/sessions/a.jsonl", preview: "fix the login bug in auth.go", turns: 12, modTime: t0 - 3_600_000, current: true },
+    { path: "/mock/sessions/b.jsonl", preview: "refactor the payment module", turns: 5, modTime: t0 - 6 * 3_600_000, current: false },
+    { path: "/mock/sessions/c.jsonl", preview: "write the README and badges", turns: 8, modTime: t0 - day - 3_600_000, current: false },
+    { path: "/mock/sessions/d.jsonl", preview: "explain the plugin host design", turns: 3, modTime: t0 - 4 * day, current: false },
+  ];
+  // Mutable settings so the Settings panel's edits are observable in browser dev.
+  const settings: SettingsView = {
+    defaultModel: "deepseek-flash",
+    plannerModel: "",
+    providers: [
+      { name: "deepseek-flash", kind: "openai", baseUrl: "https://api.deepseek.com", models: ["deepseek-v4-flash"], default: "deepseek-v4-flash", apiKeyEnv: "DEEPSEEK_API_KEY", keySet: true, contextWindow: 1_000_000 },
+      { name: "mimo-pro", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-pro"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", keySet: false, contextWindow: 1_000_000 },
+    ],
+    permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["bash(rm *)"] },
+    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [] },
+    agent: { temperature: 0.2, maxSteps: 0, systemPrompt: "You are Reasonix, a coding agent." },
+    language: "",
+    configPath: "~/projects/reasonix/reasonix.toml",
+  };
   return {
     async Submit(input) {
       cancelled = false;
@@ -179,6 +229,29 @@ function makeMockApp(): AppBindings {
     async History() {
       return [];
     },
+    async ListSessions() {
+      return sessions.map((s) => ({ ...s }));
+    },
+    async ResumeSession(path: string) {
+      return [
+        { role: "user", content: `(mock) resumed ${path}` },
+        { role: "assistant", content: "This is a mock resumed transcript — the real one comes from the kernel." },
+      ];
+    },
+    async DeleteSession(path: string) {
+      const i = sessions.findIndex((s) => s.path === path);
+      if (i >= 0) sessions.splice(i, 1);
+    },
+    async RenameSession(path: string, title: string) {
+      const s = sessions.find((x) => x.path === path);
+      if (s) s.title = title.trim() || undefined;
+    },
+    async PickWorkspace() {
+      // Browser dev has no native dialog; simulate picking a folder and re-root so
+      // the topbar folder chip visibly changes.
+      cwd = cwd.endsWith("another-project") ? "~/projects/reasonix" : "~/projects/another-project";
+      return cwd;
+    },
     async ContextUsage() {
       return { used: 1280, window: 1_000_000 };
     },
@@ -187,7 +260,7 @@ function makeMockApp(): AppBindings {
         label: "mock model · browser dev",
         ready: true,
         eventChannel: EVENT_CHANNEL,
-        cwd: "~/projects/reasonix",
+        cwd,
       };
     },
     async Commands() {
@@ -261,6 +334,48 @@ function makeMockApp(): AppBindings {
     async SaveDoc(path: string, _body: string) {
       emit({ kind: "notice", level: "info", text: `saved → ${path}` });
       return path;
+    },
+    async Settings() {
+      return JSON.parse(JSON.stringify(settings)) as SettingsView;
+    },
+    async SetDefaultModel(ref: string) {
+      settings.defaultModel = ref;
+    },
+    async SetPlannerModel(ref: string) {
+      settings.plannerModel = ref;
+    },
+    async SaveProvider(p: ProviderView) {
+      const i = settings.providers.findIndex((x) => x.name === p.name);
+      if (i >= 0) settings.providers[i] = p;
+      else settings.providers.push(p);
+    },
+    async DeleteProvider(name: string) {
+      settings.providers = settings.providers.filter((p) => p.name !== name);
+    },
+    async SetProviderKey(apiKeyEnv: string) {
+      settings.providers.forEach((p) => {
+        if (p.apiKeyEnv === apiKeyEnv) p.keySet = true;
+      });
+    },
+    async SetPermissionMode(mode: string) {
+      settings.permissions.mode = mode;
+    },
+    async AddPermissionRule(list: string, rule: string) {
+      const k = list as "allow" | "ask" | "deny";
+      if (settings.permissions[k] && !settings.permissions[k].includes(rule)) settings.permissions[k].push(rule);
+    },
+    async RemovePermissionRule(list: string, rule: string) {
+      const k = list as "allow" | "ask" | "deny";
+      settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
+    },
+    async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[]) {
+      settings.sandbox = { bash, network, workspaceRoot, allowWrite };
+    },
+    async SetAgentParams(temperature: number, maxSteps: number, systemPrompt: string) {
+      settings.agent = { temperature, maxSteps, systemPrompt };
+    },
+    async SetLanguage(lang: string) {
+      settings.language = lang;
     },
   };
 }

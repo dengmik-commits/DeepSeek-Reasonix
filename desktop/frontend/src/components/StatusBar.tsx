@@ -66,6 +66,7 @@ export function StatusBar({
   turnStartAt,
   turnTokens,
   onSwitchModel,
+  onPickFolder,
 }: {
   meta?: Meta;
   context: ContextInfo;
@@ -74,6 +75,7 @@ export function StatusBar({
   turnStartAt: number;
   turnTokens: number;
   onSwitchModel: (name: string) => void;
+  onPickFolder: () => void;
 }) {
   const now = useTick(running);
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
@@ -108,10 +110,15 @@ export function StatusBar({
       {meta?.cwd && (
         <>
           <span className="statusbar__sep">·</span>
-          <span className="statusbar__cwd">
+          <button
+            className="statusbar__cwd"
+            onClick={onPickFolder}
+            disabled={running}
+            title={running ? "Finish or stop the current turn first" : `${meta.cwd}\nClick to switch project folder`}
+          >
             <FolderGit2 size={11} />
             {shortCwd(meta.cwd)}
-          </span>
+          </button>
         </>
       )}
       <span className="statusbar__spacer" />

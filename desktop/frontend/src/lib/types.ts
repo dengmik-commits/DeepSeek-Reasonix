@@ -85,6 +85,16 @@ export interface HistoryMessage {
   content: string;
 }
 
+// SessionMeta is one saved session for the history panel.
+export interface SessionMeta {
+  path: string;
+  preview: string;
+  title?: string; // user-chosen name; falls back to preview when empty
+  turns: number;
+  modTime: number; // unix milliseconds
+  current: boolean;
+}
+
 export interface ContextInfo {
   used: number;
   window: number;
@@ -142,4 +152,47 @@ export interface MemoryView {
   scopes: MemoryScope[];
   storeDir: string;
   available: boolean;
+}
+
+// Settings panel payloads (desktop/settings_app.go).
+export interface ProviderView {
+  name: string;
+  kind: string;
+  baseUrl: string;
+  models: string[];
+  default: string;
+  apiKeyEnv: string;
+  keySet: boolean; // the env var currently resolves to a value
+  contextWindow: number;
+}
+
+export interface PermissionsView {
+  mode: string; // "ask" | "allow" | "deny"
+  allow: string[];
+  ask: string[];
+  deny: string[];
+}
+
+export interface SandboxView {
+  bash: string; // "enforce" | "off"
+  network: boolean;
+  workspaceRoot: string;
+  allowWrite: string[];
+}
+
+export interface AgentView {
+  temperature: number;
+  maxSteps: number;
+  systemPrompt: string;
+}
+
+export interface SettingsView {
+  defaultModel: string;
+  plannerModel: string;
+  providers: ProviderView[];
+  permissions: PermissionsView;
+  sandbox: SandboxView;
+  agent: AgentView;
+  language: string;
+  configPath: string;
 }

@@ -489,6 +489,14 @@ func (c *Controller) SetSessionPath(p string) {
 // persistence), so the caller can decide whether to mint a path.
 func (c *Controller) SessionDir() string { return c.sessionDir }
 
+// SessionPath reports the file the current conversation auto-saves to ("" when
+// persistence is disabled), so a history view can mark the active session.
+func (c *Controller) SessionPath() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessionPath
+}
+
 // History returns the executor's current message log (for repopulating a
 // resumed frontend's view).
 func (c *Controller) History() []provider.Message {

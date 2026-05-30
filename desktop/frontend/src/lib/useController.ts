@@ -13,6 +13,7 @@ import type {
   MemoryView,
   Meta,
   QuestionAnswer,
+  SessionMeta,
   WireApproval,
   WireAsk,
   WireEvent,
@@ -384,6 +385,57 @@ export function useController() {
     dispatch({ type: "reset" });
   }, []);
 
+  // Session history: list saved sessions (the panel fetches on open), and resume
+  // one — the model/folder are unchanged, only the transcript is swapped.
+  const listSessions = useCallback((): Promise<SessionMeta[]> => {
+    return app.ListSessions().catch(() => []);
+  }, []);
+
+  const resumeSession = useCallback(async (path: string) => {
+    const messages = await app.ResumeSession(path).catch(() => [] as HistoryMessage[]);
+    dispatch({ type: "reset" });
+    if (messages.length) dispatch({ type: "history", messages });
+    app.ContextUsage().then((context) => dispatch({ type: "context", context })).catch(() => {});
+  }, []);
+
+  // Manage saved sessions: delete one, or give it a custom name (""=clear). Both
+  // only touch on-disk state; the caller re-fetches the list to reflect the change.
+  const deleteSession = useCallback((path: string) => {
+    return app.DeleteSession(path).catch(() => {});
+  }, []);
+
+  const renameSession = useCallback((path: string, title: string) => {
+    return app.RenameSession(path, title).catch(() => {});
+  }, []);
+
+  // refreshMeta re-pulls the model label, gauge, and cwd — used by the Settings
+  // panel after a change that rebuilds the controller (model/provider/sandbox/…).
+  const refreshMeta = useCallback(async () => {
+    try {
+      dispatch({ type: "meta", meta: await app.Meta() });
+      dispatch({ type: "context", context: await app.ContextUsage() });
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Workspace: open a folder chooser and switch to that project. On a pick the
+  // backend rebuilds the controller (new model/config) with a fresh session, so
+  // reset and refresh meta/context. Returns the chosen path ("" if cancelled).
+  const pickWorkspace = useCallback(async (): Promise<string> => {
+    const path = await app.PickWorkspace().catch(() => "");
+    if (path) {
+      dispatch({ type: "reset" });
+      try {
+        dispatch({ type: "meta", meta: await app.Meta() });
+        dispatch({ type: "context", context: await app.ContextUsage() });
+      } catch {
+        /* ignore */
+      }
+    }
+    return path;
+  }, []);
+
   const compact = useCallback(() => {
     app.Compact().catch(() => {});
   }, []);
@@ -424,6 +476,12 @@ export function useController() {
     answerQuestion,
     setPlan,
     newSession,
+    listSessions,
+    resumeSession,
+    deleteSession,
+    renameSession,
+    refreshMeta,
+    pickWorkspace,
     compact,
     setModel,
     fetchMemory,

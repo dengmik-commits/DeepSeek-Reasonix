@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { SquarePen, Brain } from "lucide-react";
+import { SquarePen, Brain, History, Settings as SettingsIcon } from "lucide-react";
 import { useController } from "./lib/useController";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
@@ -8,14 +8,35 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { StatusBar } from "./components/StatusBar";
 import { MemoryPanel } from "./components/MemoryPanel";
+import { HistoryPanel } from "./components/HistoryPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { parseTodos } from "./lib/tools";
-import type { MemoryView } from "./lib/types";
+import type { MemoryView, SessionMeta } from "./lib/types";
 
 export default function App() {
-  const { state, send, cancel, approve, answerQuestion, setPlan, newSession, setModel, fetchMemory, remember, saveDoc } =
-    useController();
+  const {
+    state,
+    send,
+    cancel,
+    approve,
+    answerQuestion,
+    setPlan,
+    newSession,
+    listSessions,
+    resumeSession,
+    deleteSession,
+    renameSession,
+    refreshMeta,
+    pickWorkspace,
+    setModel,
+    fetchMemory,
+    remember,
+    saveDoc,
+  } = useController();
   const [plan, setPlanLocal] = useState(false);
   const [memView, setMemView] = useState<MemoryView | null>(null);
+  const [histView, setHistView] = useState<SessionMeta[] | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const togglePlan = () => {
     const next = !plan;
@@ -62,6 +83,42 @@ export default function App() {
 
   const closeMemory = useCallback(() => setMemView(null), []);
 
+  // History drawer: opening fetches the saved-session list; picking one resumes it
+  // (the transcript swaps in; the model/folder are unchanged).
+  const openHistory = useCallback(async () => {
+    setHistView(await listSessions());
+  }, [listSessions]);
+  const closeHistory = useCallback(() => setHistView(null), []);
+  const onResumeSession = useCallback(
+    async (path: string) => {
+      setHistView(null);
+      await resumeSession(path);
+    },
+    [resumeSession],
+  );
+  // Delete / rename act on disk, then re-fetch so the panel reflects the change.
+  const onDeleteSession = useCallback(
+    async (path: string) => {
+      await deleteSession(path);
+      setHistView(await listSessions());
+    },
+    [deleteSession, listSessions],
+  );
+  const onRenameSession = useCallback(
+    async (path: string, title: string) => {
+      await renameSession(path, title);
+      setHistView(await listSessions());
+    },
+    [renameSession, listSessions],
+  );
+
+  // Workspace: open the folder chooser and switch projects (from the status bar's
+  // folder button). The hook resets the transcript and refreshes meta on a pick; a
+  // cancel is a no-op.
+  const switchFolder = useCallback(async () => {
+    await pickWorkspace();
+  }, [pickWorkspace]);
+
   const onRemember = useCallback(
     async (scope: string, note: string) => {
       await remember(scope, note);
@@ -83,8 +140,24 @@ export default function App() {
       <header className="topbar">
         <span className="topbar__model">{state.meta?.label ?? "…"}</span>
         <div className="topbar__spacer" />
+        <button
+          className="chip chip--icon"
+          onClick={() => void openHistory()}
+          disabled={state.running}
+          title={state.running ? "Finish or stop the current turn first" : "History"}
+        >
+          <History size={13} />
+        </button>
         <button className="chip chip--icon" onClick={() => void openMemory()} title="Memory">
           <Brain size={13} />
+        </button>
+        <button
+          className="chip chip--icon"
+          onClick={() => setSettingsOpen(true)}
+          disabled={state.running}
+          title={state.running ? "Finish or stop the current turn first" : "Settings"}
+        >
+          <SettingsIcon size={13} />
         </button>
         <button className="chip chip--icon" onClick={newSession} title="New session">
           <SquarePen size={13} />
@@ -110,6 +183,7 @@ export default function App() {
           turnStartAt={state.turnStartAt}
           turnTokens={state.turnTokens}
           onSwitchModel={switchModel}
+          onPickFolder={() => void switchFolder()}
         />
       </footer>
 
@@ -141,6 +215,18 @@ export default function App() {
           onSaveDoc={onSaveDoc}
         />
       )}
+
+      {histView !== null && (
+        <HistoryPanel
+          sessions={histView}
+          onResume={onResumeSession}
+          onDelete={onDeleteSession}
+          onRename={onRenameSession}
+          onClose={closeHistory}
+        />
+      )}
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onChanged={() => void refreshMeta()} />}
     </div>
   );
 }

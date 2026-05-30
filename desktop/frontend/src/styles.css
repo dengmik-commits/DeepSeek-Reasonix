@@ -69,6 +69,20 @@
     --accent-fg: #fff;
   }
 }
+/* Force light regardless of OS when the user picks it in Settings. */
+:root[data-theme="light"] {
+  --bg: #faf9f7;
+  --bg-soft: #f3f1ee;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #f0eeea;
+  --border: #e2ddd6;
+  --border-soft: #ece8e2;
+  --fg: #20201d;
+  --fg-dim: #5c5a55;
+  --fg-faint: #8c8980;
+  --accent: #c2613f;
+  --accent-fg: #fff;
+}
 
 * {
   box-sizing: border-box;
@@ -149,6 +163,14 @@ body {
 .chip:hover {
   color: var(--fg);
   border-color: var(--fg-faint);
+}
+.chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chip:disabled:hover {
+  color: var(--fg-dim);
+  border-color: var(--border);
 }
 .chip--on {
   color: var(--accent);
@@ -869,9 +891,31 @@ body {
   color: var(--accent);
 }
 .statusbar__cwd {
+  --wails-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  padding: 2px 6px;
+  margin: 0 -2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.statusbar__cwd:hover {
+  color: var(--fg-dim);
+  background: var(--bg-soft);
+}
+.statusbar__cwd:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.statusbar__cwd:disabled:hover {
+  color: inherit;
+  background: transparent;
 }
 .statusbar__spacer {
   flex: 1;
@@ -1390,6 +1434,235 @@ body {
 .badge--reference {
   color: var(--accent);
   border-color: var(--accent-soft);
+}
+
+/* ── history drawer: click-to-resume rows with rename/delete actions ────────── */
+.hist-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  margin-bottom: 6px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.12s;
+}
+.hist-item:hover {
+  border-color: var(--fg-faint);
+}
+.hist-item--current {
+  border-color: var(--accent-soft);
+}
+.hist-item__main {
+  --wails-draggable: no-drag;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 9px 10px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.hist-item__preview {
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hist-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.hist-item__badge {
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.hist-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 5px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.hist-item:hover .hist-item__actions,
+.hist-item:focus-within .hist-item__actions {
+  opacity: 1;
+}
+.hist-act {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.hist-act:hover {
+  color: var(--fg);
+  background: var(--bg);
+}
+.hist-act--danger,
+.hist-act--danger:hover {
+  color: #e5534b;
+}
+.hist-item__rename {
+  flex: 1;
+  min-width: 0;
+  margin: 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* ── settings drawer ───────────────────────────────────────────────────────── */
+.drawer--wide {
+  width: min(560px, 94vw);
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.set-label {
+  font-size: 12px;
+  color: var(--fg-dim);
+  min-width: 92px;
+}
+.set-grow {
+  flex: 1;
+  min-width: 140px;
+}
+.set-narrow {
+  width: 72px;
+}
+.set-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.prov-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  margin-bottom: 8px;
+  background: var(--bg-soft);
+}
+.prov-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prov-card__name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.prov-card__spacer {
+  flex: 1;
+}
+.prov-card__meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  word-break: break-all;
+}
+.prov-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.set-key {
+  display: flex;
+  gap: 6px;
+}
+.set-rules {
+  margin-bottom: 10px;
+}
+.set-rules__label {
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-bottom: 5px;
+}
+.set-rules__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.set-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 4px 3px 7px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.set-rule__x {
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 11px;
+}
+.set-rule__x:hover {
+  color: var(--err);
+}
+.set-rules__add {
+  display: flex;
+  gap: 6px;
+}
+.set-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.set-seg__btn {
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 13px;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.set-seg__btn--on {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ── tool card extras: outcome line, nested sub-agent, multi-edit labels ───── */

@@ -158,6 +158,131 @@ func (a *App) NewSession() error {
 	return a.ctrl.NewSession()
 }
 
+// SessionMeta summarises one saved session for the history panel.
+type SessionMeta struct {
+	Path    string `json:"path"`
+	Preview string `json:"preview"`         // first user message
+	Title   string `json:"title,omitempty"` // user-chosen name, when set (overrides preview)
+	Turns   int    `json:"turns"`
+	ModTime int64  `json:"modTime"` // unix milliseconds, for the frontend to group/format
+	Current bool   `json:"current"`
+}
+
+// ListSessions returns the saved sessions newest-first for the history panel,
+// marking the one the current conversation is writing to and attaching any
+// user-chosen titles.
+func (a *App) ListSessions() []SessionMeta {
+	dir := config.SessionDir()
+	infos, err := agent.ListSessions(dir)
+	if err != nil {
+		return []SessionMeta{}
+	}
+	titles := loadSessionTitles(dir)
+	cur := ""
+	if a.ctrl != nil {
+		cur = a.ctrl.SessionPath()
+	}
+	out := make([]SessionMeta, 0, len(infos))
+	for _, s := range infos {
+		out = append(out, SessionMeta{
+			Path:    s.Path,
+			Preview: s.Preview,
+			Title:   titles[filepath.Base(s.Path)],
+			Turns:   s.Turns,
+			ModTime: s.ModTime.UnixMilli(),
+			Current: s.Path == cur,
+		})
+	}
+	return out
+}
+
+// DeleteSession removes a saved session (and its title). It refuses the active
+// session — that's the conversation on screen, and auto-save would recreate the
+// file on the next turn; start a new session first to retire it.
+func (a *App) DeleteSession(path string) error {
+	if a.ctrl != nil && a.ctrl.SessionPath() == path {
+		return errActiveSession
+	}
+	return deleteSessionFile(config.SessionDir(), path)
+}
+
+// RenameSession sets a custom display name for a session (empty clears it back to
+// the preview). It only affects the history panel; the file on disk is unchanged.
+func (a *App) RenameSession(path, title string) error {
+	return setSessionTitle(config.SessionDir(), path, title)
+}
+
+// ResumeSession snapshots the current conversation, then loads the session at
+// path and continues it — auto-save keeps appending to that file. The model and
+// working folder are unchanged (same controller); only the transcript is swapped.
+// Returns the resumed messages for the frontend to render.
+func (a *App) ResumeSession(path string) ([]HistoryMessage, error) {
+	if a.ctrl == nil {
+		return []HistoryMessage{}, nil
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		return nil, err
+	}
+	_ = a.ctrl.Snapshot() // persist the current session before switching away
+	a.ctrl.Resume(loaded, path)
+	return a.History(), nil
+}
+
+// PickWorkspace opens a folder chooser and, on a pick, switches the agent to that
+// project: it re-roots the process there, rebuilds the controller from that
+// folder's reasonix.toml + REASONIX.md, and starts a fresh session — the desktop
+// analogue of opening a different project. The new controller is built before the
+// old one is torn down, so a folder whose config can't load leaves the current
+// session untouched. Returns the chosen path ("" if cancelled).
+func (a *App) PickWorkspace() (string, error) {
+	if a.ctx == nil {
+		return "", nil
+	}
+	cur, _ := os.Getwd()
+	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "Choose working folder",
+		DefaultDirectory: cur,
+	})
+	if err != nil || dir == "" {
+		return "", err // cancelled or error → no change
+	}
+	if dir == cur {
+		return dir, nil
+	}
+	if err := os.Chdir(dir); err != nil {
+		return "", err
+	}
+	// Resolve the new folder's default model from its own config.
+	model := ""
+	if cfg, cerr := config.Load(); cerr == nil {
+		model = cfg.DefaultModel
+		if e, ok := cfg.ResolveModel(cfg.DefaultModel); ok {
+			model = e.Name + "/" + e.Model
+		}
+	}
+	ctrl, err := boot.Build(a.ctx, boot.Options{Model: model, RequireKey: false, Sink: a.sink})
+	if err != nil {
+		_ = os.Chdir(cur) // roll back; the current session stays intact
+		return "", err
+	}
+	// Commit the switch: save and tear down the old session, then swap in the new
+	// project's controller with a fresh session file.
+	if a.ctrl != nil {
+		_ = a.ctrl.Snapshot()
+		a.ctrl.Close()
+	}
+	a.ctrl = ctrl
+	a.model = model
+	a.label = ctrl.Label()
+	a.startupErr = ""
+	ctrl.EnableInteractiveApproval()
+	if d := ctrl.SessionDir(); d != "" {
+		ctrl.SetSessionPath(agent.NewSessionPath(d, ctrl.Label()))
+	}
+	return dir, nil
+}
+
 // HistoryMessage is one prior turn, for the frontend to repopulate its transcript
 // after a reload.
 type HistoryMessage struct {
