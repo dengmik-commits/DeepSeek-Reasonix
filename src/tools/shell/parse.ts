@@ -349,7 +349,14 @@ export function isAllowed(
     if (projectRoot) {
       const root = pathMod.resolve(projectRoot);
       for (const tok of argv) {
-        if (!tok || tok.startsWith("-") || tok.includes("://") || tok.startsWith("$")) continue;
+        if (
+          !tok ||
+          tok.startsWith("-") ||
+          tok.startsWith("/") ||
+          tok.includes("://") ||
+          tok.startsWith("$")
+        )
+          continue;
         let expanded = tok;
         if (expanded.startsWith("~")) expanded = pathMod.join(homedir(), expanded.slice(1));
         const resolved = pathMod.resolve(root, expanded);
