@@ -166,6 +166,7 @@ export const zh: Record<DictKey, string> = {
   // 斜杠菜单标签
   "slash.project": "项目",
   "slash.mcp": "mcp",
+  "slash.skill": "skill",
 
   // 助手消息
   "msg.thinking": "思考过程",

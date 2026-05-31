@@ -165,6 +165,7 @@ export const en = {
   // slash menu tags
   "slash.project": "project",
   "slash.mcp": "mcp",
+  "slash.skill": "skill",
 
   // assistant message
   "msg.thinking": "thinking",

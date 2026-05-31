@@ -19,6 +19,7 @@ import type {
   QuestionAnswer,
   SessionMeta,
   SettingsView,
+  SlashArgsResult,
   WireEvent,
 } from "./types";
 
@@ -51,6 +52,7 @@ export interface AppBindings {
   Jobs(): Promise<JobView[]>;
   Meta(): Promise<Meta>;
   Commands(): Promise<CommandInfo[]>;
+  SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
   Models(): Promise<ModelInfo[]>;
   SetModel(name: string): Promise<void>;
@@ -290,8 +292,37 @@ function makeMockApp(): AppBindings {
       return [
         { name: "new", description: "Start a new session", kind: "builtin" as const },
         { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const },
+        { name: "model", description: "Switch model", kind: "builtin" as const },
+        { name: "skill", description: "List skills", kind: "builtin" as const },
+        { name: "explore", description: "Investigate the codebase in an isolated subagent", kind: "skill" as const },
         { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const },
       ];
+    },
+    async SlashArgs(input: string) {
+      // Mirror a slice of the real arg hints so the menu is exercisable in browser dev.
+      const from = input.lastIndexOf(" ") + 1;
+      const cur = input.slice(from);
+      const cmd = input.slice(0, input.indexOf(" ") < 0 ? input.length : input.indexOf(" "));
+      const subs: Record<string, { label: string; insert: string; hint: string; descend?: boolean }[]> = {
+        "/skill": [
+          { label: "list", insert: "list", hint: "list skills" },
+          { label: "show", insert: "show ", hint: "show a skill's body", descend: true },
+          { label: "new", insert: "new ", hint: "scaffold a new skill" },
+          { label: "paths", insert: "paths", hint: "show discovery paths" },
+        ],
+        "/hooks": [
+          { label: "list", insert: "list", hint: "list active hooks" },
+          { label: "trust", insert: "trust", hint: "trust this project's hooks" },
+        ],
+        "/model": [
+          { label: "deepseek/deepseek-v4-flash", insert: "deepseek/deepseek-v4-flash", hint: "current" },
+          { label: "deepseek/deepseek-v4-pro", insert: "deepseek/deepseek-v4-pro", hint: "" },
+        ],
+      };
+      const items = (subs[cmd] ?? [])
+        .filter((it) => it.label.toLowerCase().startsWith(cur.toLowerCase()))
+        .map((it) => ({ label: it.label, insert: it.insert, hint: it.hint, descend: it.descend ?? false }));
+      return { items, from };
     },
     async ListDir(rel: string) {
       // A tiny fake tree so the @ menu is navigable in browser dev.

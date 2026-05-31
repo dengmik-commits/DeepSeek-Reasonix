@@ -3,8 +3,9 @@ import type { KeyboardEvent } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { CommandInfo, DirEntry, Mode } from "../lib/types";
+import type { CommandInfo, DirEntry, Mode, SlashArgItem, SlashArgsResult } from "../lib/types";
 import { SlashMenu } from "./SlashMenu";
+import { ArgMenu } from "./ArgMenu";
 import { FileMenu } from "./FileMenu";
 
 export function Composer({
@@ -42,6 +43,30 @@ export function Composer({
     () => (slashQuery === null ? [] : commands.filter((c) => c.name.toLowerCase().includes(slashQuery)).slice(0, 8)),
     [slashQuery, commands],
   );
+
+  // --- slash argument completion ("/cmd <args>") --- mirrors the CLI: once past
+  // the command word, the backend suggests sub-commands (/skill → list/show/…,
+  // /mcp → add/remove, /model → refs). Fetched from app.SlashArgs.
+  const [argRes, setArgRes] = useState<SlashArgsResult | null>(null);
+  useEffect(() => {
+    if (!text.startsWith("/") || !/\s/.test(text)) {
+      setArgRes(null);
+      return;
+    }
+    let live = true;
+    app
+      .SlashArgs(text)
+      .then((r) => {
+        if (live) {
+          setArgRes(r.items.length > 0 ? r : null);
+          setActive(0);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [text]);
 
   // --- @ file references (token at the end of the text) ---
   // atRaw is everything after a trailing "@token"; atDir is its path up to the
@@ -90,10 +115,24 @@ export function Composer({
     [atRaw, atFrag, entries],
   );
 
-  // --- which menu (if any) is open --- (slash wins; they're rarely both valid)
-  const menuMode: "slash" | "at" | null =
-    slashMatches.length > 0 && !dismissed ? "slash" : atMatches.length > 0 && !dismissed ? "at" : null;
-  const count = menuMode === "slash" ? slashMatches.length : menuMode === "at" ? atMatches.length : 0;
+  // --- which menu (if any) is open --- (slash command names win; then slash
+  // arguments; then @-refs — they're rarely valid at once)
+  const menuMode: "slash" | "slasharg" | "at" | null =
+    slashMatches.length > 0 && !dismissed
+      ? "slash"
+      : argRes && argRes.items.length > 0 && !dismissed
+        ? "slasharg"
+        : atMatches.length > 0 && !dismissed
+          ? "at"
+          : null;
+  const count =
+    menuMode === "slash"
+      ? slashMatches.length
+      : menuMode === "slasharg"
+        ? argRes!.items.length
+        : menuMode === "at"
+          ? atMatches.length
+          : 0;
 
   // Reset highlight + un-dismiss whenever the active query changes.
   useEffect(() => {
@@ -135,8 +174,17 @@ export function Composer({
     setTextCaretEnd(prefix + "@" + atDir + e.name + (e.isDir ? "/" : " "));
   };
 
+  // pickArg replaces just the current token with the suggestion. A "descend" item
+  // (e.g. "/skill show ") ends with a space, so the effect re-fetches the next
+  // level; a terminal item leaves the menu (next fetch returns nothing).
+  const pickArg = (it: SlashArgItem) => {
+    if (!argRes) return;
+    setTextCaretEnd(text.slice(0, argRes.from) + it.insert);
+  };
+
   const pickActive = () => {
     if (menuMode === "slash") pickCommand(slashMatches[active]);
+    else if (menuMode === "slasharg" && argRes) pickArg(argRes.items[active]);
     else if (menuMode === "at") pickEntry(atMatches[active]);
   };
 
@@ -191,6 +239,9 @@ export function Composer({
     <div className="composer-wrap">
       {menuMode === "slash" && (
         <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />
+      )}
+      {menuMode === "slasharg" && argRes && (
+        <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
       {menuMode === "at" && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
       <button

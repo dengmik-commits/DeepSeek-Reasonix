@@ -19,7 +19,13 @@ export function SlashMenu({
   const t = useT();
   // builtin commands get no tag; custom (project) and mcp commands are labelled.
   const kindTag = (kind: CommandInfo["kind"]) =>
-    kind === "custom" ? t("slash.project") : kind === "mcp" ? t("slash.mcp") : "";
+    kind === "custom"
+      ? t("slash.project")
+      : kind === "mcp"
+        ? t("slash.mcp")
+        : kind === "skill"
+          ? t("slash.skill")
+          : "";
   return (
     <div className="slashmenu" role="listbox">
       {items.map((c, i) => (

@@ -699,6 +699,11 @@ body {
   color: var(--fg-dim);
   padding: 5px 11px;
   border-left: 2px solid var(--border);
+  /* Listings (/skill, /hooks, /mcp, /memory, /model) are multi-line with leading
+     spaces; preserve them so the output isn't crammed onto one line. Monospace
+     keeps the indented entries aligned, like the CLI. */
+  white-space: pre-wrap;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 .notice--warn {
   color: var(--warn);

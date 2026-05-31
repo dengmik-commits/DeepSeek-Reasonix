@@ -445,6 +445,48 @@ func (a *App) Commands() []CommandInfo {
 	return out
 }
 
+// SlashArgItem is one sub-command / argument suggestion for the composer's slash
+// menu (the part after the command word). Mirrors the CLI's arg completion via
+// the shared control.SlashArgItems, so desktop and CLI offer the same hints.
+type SlashArgItem struct {
+	Label   string `json:"label"`
+	Insert  string `json:"insert"`
+	Hint    string `json:"hint"`
+	Descend bool   `json:"descend"`
+}
+
+// SlashArgsResult carries the suggestions plus the byte offset in the input where
+// the current token begins, so the composer replaces just that token.
+type SlashArgsResult struct {
+	Items []SlashArgItem `json:"items"`
+	From  int            `json:"from"`
+}
+
+// SlashArgs completes the arguments of a management slash command (/mcp, /model,
+// /skill, /hooks) for the composer — the same logic the chat TUI uses. Empty
+// Items means the input has no structured arguments to complete.
+func (a *App) SlashArgs(input string) SlashArgsResult {
+	if a.ctrl == nil {
+		return SlashArgsResult{}
+	}
+	data := control.ArgData{
+		Skills:       a.ctrl.Skills(),
+		CurrentModel: a.model,
+	}
+	for _, m := range a.Models() {
+		data.ModelRefs = append(data.ModelRefs, m.Ref)
+	}
+	if h := a.ctrl.Host(); h != nil {
+		data.ServerNames = h.ServerNames()
+	}
+	items, from := control.SlashArgItems(input, data)
+	out := SlashArgsResult{From: from}
+	for _, it := range items {
+		out.Items = append(out.Items, SlashArgItem{Label: it.Label, Insert: it.Insert, Hint: it.Hint, Descend: it.Descend})
+	}
+	return out
+}
+
 // ModelInfo is one (provider, model) the bottom switcher can pick. Ref ("provider/
 // model") is what SetModel takes; Provider/Model are for display.
 type ModelInfo struct {

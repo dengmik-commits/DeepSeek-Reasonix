@@ -5,7 +5,143 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/skill"
 )
+
+// SlashItem is one slash-completion suggestion. Insert is the token text placed
+// at the current argument position (callers replace from the token's start, see
+// SlashArgItems' returned offset); Descend hints the menu to re-open one level
+// deeper after accepting (e.g. "/mcp " → "/mcp add ").
+type SlashItem struct {
+	Label   string `json:"label"`
+	Insert  string `json:"insert"`
+	Hint    string `json:"hint"`
+	Descend bool   `json:"descend"`
+}
+
+// ArgData supplies the dynamic data SlashArgItems needs, so the completion logic
+// is one shared function both frontends call with their own session data — the
+// chat TUI (controller-free, from its cached lists) and the desktop (from the
+// controller). This keeps the CLI and desktop sub-command hints identical.
+type ArgData struct {
+	Skills       []skill.Skill
+	ServerNames  []string
+	ModelRefs    []string
+	CurrentModel string
+}
+
+// SlashArgItems completes the arguments of a management slash command
+// (everything after the command word). It returns the suggestions filtered by
+// the token being typed and the byte offset where that token begins, so a caller
+// replaces just that token. Only structured commands participate (/mcp /model
+// /skill /hooks); others yield nil. Single source of truth for CLI + desktop.
+func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
+	cmdEnd := strings.IndexAny(line, " \t")
+	if cmdEnd < 0 {
+		return nil, 0
+	}
+	from := strings.LastIndexAny(line, " \t") + 1
+	cur := line[from:]
+	prior := strings.Fields(line[:from]) // committed tokens, including the command word
+	switch line[:cmdEnd] {
+	case "/mcp":
+		return filterSlash(mcpArgItems(prior, cur, d), cur), from
+	case "/model":
+		return filterSlash(modelArgItems(prior, d), cur), from
+	case "/skill", "/skills":
+		return filterSlash(skillArgItems(prior, d), cur), from
+	case "/hooks":
+		return filterSlash(hooksArgItems(prior), cur), from
+	}
+	return nil, from
+}
+
+func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "add", Insert: "add ", Hint: "connect a server", Descend: true},
+			{Label: "remove", Insert: "remove ", Hint: "disconnect a server", Descend: true},
+			{Label: "list", Insert: "list", Hint: "show configured servers"},
+		}
+	}
+	switch prior[1] {
+	case "remove", "rm":
+		if len(prior) != 2 { // the single name arg is already placed
+			return nil
+		}
+		var items []SlashItem
+		for _, name := range d.ServerNames {
+			items = append(items, SlashItem{Label: name, Insert: name, Hint: "connected"})
+		}
+		return items
+	case "add":
+		if strings.HasPrefix(cur, "-") {
+			return []SlashItem{
+				{Label: "--http", Insert: "--http ", Hint: "Streamable HTTP URL"},
+				{Label: "--sse", Insert: "--sse ", Hint: "legacy SSE URL"},
+				{Label: "--env", Insert: "--env ", Hint: "KEY=VALUE (stdio)"},
+				{Label: "--header", Insert: "--header ", Hint: "KEY=VALUE (remote)"},
+			}
+		}
+	}
+	return nil
+}
+
+func modelArgItems(prior []string, d ArgData) []SlashItem {
+	if len(prior) != 1 { // the single ref arg is already placed
+		return nil
+	}
+	var items []SlashItem
+	for _, ref := range d.ModelRefs {
+		hint := ""
+		if ref == d.CurrentModel {
+			hint = "current"
+		}
+		items = append(items, SlashItem{Label: ref, Insert: ref, Hint: hint})
+	}
+	return items
+}
+
+func skillArgItems(prior []string, d ArgData) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "list", Insert: "list", Hint: "list skills"},
+			{Label: "show", Insert: "show ", Hint: "show a skill's body", Descend: true},
+			{Label: "new", Insert: "new ", Hint: "scaffold a new skill"},
+			{Label: "paths", Insert: "paths", Hint: "show discovery paths"},
+		}
+	}
+	if (prior[1] == "show" || prior[1] == "cat") && len(prior) == 2 {
+		var items []SlashItem
+		for _, s := range d.Skills {
+			items = append(items, SlashItem{Label: s.Name, Insert: s.Name, Hint: string(s.Scope)})
+		}
+		return items
+	}
+	return nil
+}
+
+func hooksArgItems(prior []string) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "list", Insert: "list", Hint: "list active hooks"},
+			{Label: "trust", Insert: "trust", Hint: "trust this project's hooks"},
+		}
+	}
+	return nil
+}
+
+// filterSlash keeps items whose label starts with prefix (case-insensitive).
+func filterSlash(items []SlashItem, prefix string) []SlashItem {
+	lp := strings.ToLower(prefix)
+	var out []SlashItem
+	for _, it := range items {
+		if strings.HasPrefix(strings.ToLower(it.Label), lp) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
 
 // managementNotice handles the read-only management slash commands on the Submit
 // path (used by the desktop and HTTP frontends, which route raw input through

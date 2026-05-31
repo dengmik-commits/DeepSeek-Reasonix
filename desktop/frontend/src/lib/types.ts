@@ -117,7 +117,7 @@ export interface CommandInfo {
   name: string; // without the leading slash
   description: string;
   hint?: string;
-  kind: "builtin" | "custom" | "mcp";
+  kind: "builtin" | "custom" | "mcp" | "skill";
 }
 
 export interface DirEntry {
@@ -130,6 +130,19 @@ export interface ModelInfo {
   provider: string;
   model: string;
   current: boolean;
+}
+
+// Slash sub-command / argument completion (desktop/app.go SlashArgs). Mirrors the
+// CLI's arg hints so the composer can suggest e.g. /skill → list/show/new/paths.
+export interface SlashArgItem {
+  label: string;
+  insert: string; // token to place at the current position
+  hint: string;
+  descend: boolean; // re-open the menu one level deeper after accepting
+}
+export interface SlashArgsResult {
+  items: SlashArgItem[];
+  from: number; // byte offset where the current token begins
 }
 
 // Memory panel payloads (desktop/app.go MemoryView).

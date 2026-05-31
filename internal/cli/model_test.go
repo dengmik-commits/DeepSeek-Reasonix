@@ -20,11 +20,12 @@ func TestModelRefsFromConfig(t *testing.T) {
 	}
 }
 
-// TestModelArgCompletion verifies "/model " completes to the configured refs.
+// TestModelArgCompletion verifies "/model " completes to the configured refs
+// through the shared completion path.
 func TestModelArgCompletion(t *testing.T) {
 	t.Chdir(t.TempDir())
 	m := newTestChatTUI()
-	items, _, ok := m.modelArgItems("/model ", "", len("/model "))
+	items, _, ok := m.slashArgItems("/model ")
 	if !ok || len(items) == 0 {
 		t.Fatalf("/model arg completion should offer refs, ok=%v n=%d", ok, len(items))
 	}
