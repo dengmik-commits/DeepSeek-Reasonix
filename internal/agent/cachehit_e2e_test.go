@@ -22,10 +22,12 @@ import (
 // growing the request prefix the way a real multi-turn session does.
 type echoTool struct{}
 
-func (echoTool) Name() string           { return "echo" }
-func (echoTool) Description() string     { return "echo back the given text" }
-func (echoTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`) }
-func (echoTool) ReadOnly() bool          { return true }
+func (echoTool) Name() string        { return "echo" }
+func (echoTool) Description() string { return "echo back the given text" }
+func (echoTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`)
+}
+func (echoTool) ReadOnly() bool { return true }
 func (echoTool) Execute(_ context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Text string `json:"text"`
@@ -444,8 +446,10 @@ func deltaToolCall(idx int, name, args string) sseDelta {
 	return sseDelta{ToolCalls: []sseToolCall{tc}}
 }
 
-func streamChunk(d sseDelta) sseResp    { return sseResp{Choices: []sseChoice{{Delta: d}}} }
-func finishChunk(reason string) sseResp { return sseResp{Choices: []sseChoice{{FinishReason: &reason}}} }
+func streamChunk(d sseDelta) sseResp { return sseResp{Choices: []sseChoice{{Delta: d}}} }
+func finishChunk(reason string) sseResp {
+	return sseResp{Choices: []sseChoice{{FinishReason: &reason}}}
+}
 func usageChunk(prompt, completion, hit, miss int) sseResp {
 	return sseResp{Usage: &sseUsage{
 		PromptTokens:          prompt,
