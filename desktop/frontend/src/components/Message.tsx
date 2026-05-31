@@ -33,6 +33,7 @@ export function UserMessage({
             <button onClick={() => rewind("both")}>{t("rewind.both")}</button>
             <button onClick={() => rewind("conversation")}>{t("rewind.conversation")}</button>
             <button onClick={() => rewind("code")}>{t("rewind.code")}</button>
+            <button onClick={() => rewind("fork")}>{t("rewind.fork")}</button>
             <button className="rewind__cancel" onClick={() => setMenu(false)}>
               ✕
             </button>

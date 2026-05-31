@@ -22,13 +22,15 @@ type rewindPicker struct {
 	scope int // index into rewindScopes (stage 1)
 }
 
-var rewindScopes = []struct {
+var rewindActions = []struct {
 	label string
 	scope control.RewindScope
+	fork  bool
 }{
-	{"Code + conversation", control.RewindBoth},
-	{"Conversation only", control.RewindConversation},
-	{"Code only", control.RewindCode},
+	{"Code + conversation", control.RewindBoth, false},
+	{"Conversation only", control.RewindConversation, false},
+	{"Code only", control.RewindCode, false},
+	{"Fork (new branch, keep code)", 0, true},
 }
 
 // openRewind populates the picker from the session's checkpoints, selecting the
@@ -64,7 +66,7 @@ func (m chatTUI) handleRewindKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if r.sel < len(r.metas)-1 {
 				r.sel++
 			}
-		} else if r.scope < len(rewindScopes)-1 {
+		} else if r.scope < len(rewindActions)-1 {
 			r.scope++
 		}
 	case "enter":
@@ -88,6 +90,11 @@ func (m chatTUI) handleRewindKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			r.scope = 2
 			return m.applyRewind()
 		}
+	case "f":
+		if r.stage == 1 {
+			r.scope = 3
+			return m.applyRewind()
+		}
 	}
 	return m, nil
 }
@@ -95,9 +102,15 @@ func (m chatTUI) handleRewindKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	r := m.rewind
 	meta := r.metas[r.sel]
-	scope := rewindScopes[r.scope].scope
+	act := rewindActions[r.scope]
 	m.rewind = nil
-	if err := m.ctrl.Rewind(meta.Turn, scope); err != nil {
+	if act.fork {
+		if _, err := m.ctrl.Fork(meta.Turn); err != nil {
+			m.notice("fork: " + err.Error())
+		}
+		return m, nil // controller notices; the branch is a new session
+	}
+	if err := m.ctrl.Rewind(meta.Turn, act.scope); err != nil {
 		m.notice("rewind: " + err.Error())
 		return m, nil
 	}
@@ -106,7 +119,7 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	// conversation/both rewind we prefill the composer with that turn's prompt to
 	// re-send or edit — Claude Code's behavior — while the model's context is
 	// truncated underneath.
-	if scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
+	if act.scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
 		m.input.SetValue(meta.Prompt)
 		m.growInputToFit()
 	}
@@ -130,10 +143,10 @@ func (m chatTUI) renderRewind() string {
 	}
 	meta := r.metas[r.sel]
 	b.WriteString(accent("⟲ Restore to turn ") + fmt.Sprintf("%d ", meta.Turn+1) + dim(oneLine(meta.Prompt, 48)) + "\n")
-	for i, s := range rewindScopes {
+	for i, s := range rewindActions {
 		b.WriteString(rowLine(i == r.scope, i+1, "", s.label, false) + "\n")
 	}
-	b.WriteString(dim("↑/↓ · Enter apply · b/c/d quick · Esc back"))
+	b.WriteString(dim("↑/↓ · Enter apply · b/c/d/f quick · Esc back"))
 	return choicePanelStyle.Width(w).Render(b.String())
 }
 

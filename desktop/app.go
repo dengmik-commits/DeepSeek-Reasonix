@@ -206,6 +206,17 @@ func (a *App) Rewind(turn int, scope string) error {
 	return a.ctrl.Rewind(turn, s)
 }
 
+// Fork branches the conversation at the start of turn into a new session
+// (preserving the current one), keeping code intact, and switches to the branch.
+// The frontend re-reads History after this resolves.
+func (a *App) Fork(turn int) error {
+	if a.ctrl == nil {
+		return nil
+	}
+	_, err := a.ctrl.Fork(turn)
+	return err
+}
+
 // SessionMeta summarises one saved session for the history panel.
 type SessionMeta struct {
 	Path    string `json:"path"`

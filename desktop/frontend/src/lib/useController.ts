@@ -530,7 +530,12 @@ export function useController() {
   // history so the view reflects the rewound state (unlike the CLI, the desktop
   // can re-render).
   const rewind = useCallback(async (turn: number, scope: string) => {
-    await app.Rewind(turn, scope).catch(() => {});
+    // "fork" branches into a new session (keeping code); the others restore in place.
+    if (scope === "fork") {
+      await app.Fork(turn).catch(() => {});
+    } else {
+      await app.Rewind(turn, scope).catch(() => {});
+    }
     const messages = await app.History().catch(() => [] as HistoryMessage[]);
     dispatch({ type: "reset" });
     if (messages.length) dispatch({ type: "history", messages });

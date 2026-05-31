@@ -39,6 +39,7 @@ export interface AppBindings {
   // "code" | "conversation" | "both"), after which the caller re-reads History.
   Checkpoints(): Promise<CheckpointMeta[]>;
   Rewind(turn: number, scope: string): Promise<void>;
+  Fork(turn: number): Promise<void>;
   // Session history: list saved sessions, resume one (returns its transcript),
   // delete one, or give one a custom display name ("" clears it).
   ListSessions(): Promise<SessionMeta[]>;
@@ -252,6 +253,7 @@ function makeMockApp(): AppBindings {
       return [];
     },
     async Rewind() {},
+    async Fork() {},
     async History() {
       return [];
     },

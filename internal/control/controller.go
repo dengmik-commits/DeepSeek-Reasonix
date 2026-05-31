@@ -653,6 +653,55 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 	return nil
 }
 
+// Fork branches the conversation at the start of turn into a NEW session file,
+// preserving the current one as the branch point, and switches to the branch. Code
+// is untouched (it's a conversation operation). Like a conversation rewind it needs
+// the live boundary, so it is unavailable for resumed-session turns and refused
+// while a turn runs. Returns the new session path.
+func (c *Controller) Fork(turn int) (string, error) {
+	if c.executor == nil {
+		return "", fmt.Errorf("checkpoints unavailable")
+	}
+	if c.sessionDir == "" {
+		return "", fmt.Errorf("fork needs session persistence, which is disabled")
+	}
+	c.mu.Lock()
+	running := c.running
+	boundary := -1
+	if turn >= 0 && turn < len(c.cpMsgLen) {
+		boundary = c.cpMsgLen[turn]
+	}
+	c.mu.Unlock()
+	if running {
+		return "", fmt.Errorf("cannot fork while a turn is running")
+	}
+	if boundary < 0 {
+		return "", fmt.Errorf("fork unavailable for turn %d (resumed session)", turn)
+	}
+
+	// Persist the current conversation first so the branch point survives, then
+	// seed a fresh session with the messages up to the fork and switch to it.
+	_ = c.Snapshot()
+	src := c.executor.Session().Messages
+	if boundary > len(src) {
+		boundary = len(src)
+	}
+	forked := append([]provider.Message(nil), src[:boundary]...)
+	sess := agent.NewSession("")
+	sess.Messages = forked
+
+	newPath := agent.NewSessionPath(c.sessionDir, c.label)
+	c.executor.SetSession(sess)
+	c.mu.Lock()
+	c.sessionPath = newPath
+	c.mu.Unlock()
+	c.rebindCheckpoints(newPath)
+	_ = c.Snapshot()
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+		Text: fmt.Sprintf("forked conversation at turn %d into a new session", turn)})
+	return newPath, nil
+}
+
 // Resume seeds the session from a loaded transcript and pins the active file to
 // its path so auto-save keeps appending there.
 func (c *Controller) Resume(s *agent.Session, path string) {
