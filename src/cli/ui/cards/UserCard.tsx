@@ -9,12 +9,12 @@ import { formatRelativeTime } from "./time.js";
 
 export function UserCard({ card }: { card: UserCardData }): React.ReactElement {
   return (
-    <Box flexDirection="column" width="100%" paddingX={1} backgroundColor={MESSAGE_BG.user}>
+    <Box flexDirection="column" width="100%" marginTop={1} paddingX={1} backgroundColor={MESSAGE_BG.user}>
       <CardHeader
         glyph={CARD.user.glyph}
         tone={CARD.user.color}
         title={t("cardTitles.you")}
-        meta={[formatRelativeTime(card.ts)]}
+        meta={[{ text: formatRelativeTime(card.ts), color: CARD.user.color }]}
       />
       <Box flexDirection="row" gap={1}>
         <Text color={FG.sub}>↳</Text>
