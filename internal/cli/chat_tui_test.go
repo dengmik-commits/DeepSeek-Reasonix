@@ -109,37 +109,37 @@ func TestIngestEventShowsReasoningInVerboseMode(t *testing.T) {
 	}
 }
 
-// TestDeferredUserBubble proves the user bubble is held back until the server's
-// first real packet: a local TurnStarted must not commit it (that would shrink
-// the un-send window to nothing), while the first Reasoning/Text/etc. flushes it
-// — a blank separator then the bubble — just before rendering that packet.
-func TestDeferredUserBubble(t *testing.T) {
+// TestUserBubbleEchoedImmediately proves the user bubble is committed to scrollback
+// the moment the turn starts, not deferred to the server's first packet. The first
+// real packet only confirms the send (closing the un-send window); a local
+// TurnStarted must not, so Esc can still un-send until the server actually replies.
+func TestUserBubbleEchoedImmediately(t *testing.T) {
 	m := newTestChatTUI()
-	// Stand in for startTurn's deferral (no controller in the unit harness).
-	m.pendingBubble = "hello world"
+	// Stand in for startTurn's immediate echo (no controller in the unit harness).
+	m.bubbleStartIdx = len(m.transcript)
+	m.commitLine("")
+	m.commitLine(renderUserBubble("hello world", m.width, m.planMode))
 	m.bubblePending = true
 	m.state = tuiRunning
 
-	// TurnStarted is emitted locally before the request — it must not flush.
-	m.ingestEvent(event.Event{Kind: event.TurnStarted})
-	if !m.bubblePending || len(*m.pendingCommit) != 0 {
-		t.Fatalf("TurnStarted should not commit the deferred bubble, pending=%v committed=%v", m.bubblePending, *m.pendingCommit)
+	if !strings.Contains(strings.Join(m.transcript, "\n"), "hello world") {
+		t.Fatalf("bubble should be echoed to scrollback immediately, got %v", m.transcript)
 	}
 
-	// The first real packet commits the bubble (blank + bubble) ahead of itself;
-	// a reasoning packet then also shows its live thinking marker.
+	// TurnStarted is emitted locally before the request — it must not confirm.
+	m.ingestEvent(event.Event{Kind: event.TurnStarted})
+	if !m.bubblePending {
+		t.Fatalf("TurnStarted should leave the send un-sendable, pending=%v", m.bubblePending)
+	}
+
+	// The first real packet confirms the send; a reasoning packet also shows its
+	// live thinking marker.
 	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "thinking…"})
 	if m.bubblePending {
-		t.Fatalf("first packet should commit the deferred bubble")
+		t.Fatalf("first packet should confirm the send")
 	}
-	if n := len(*m.pendingCommit); n != 3 {
-		t.Fatalf("expected blank + bubble + thinking marker, got %d: %v", n, *m.pendingCommit)
-	}
-	if !strings.Contains((*m.pendingCommit)[1], "hello world") {
-		t.Errorf("committed bubble should carry the user text, got %q", (*m.pendingCommit)[1])
-	}
-	if !strings.Contains((*m.pendingCommit)[2], "thinking") {
-		t.Errorf("reasoning packet should show the thinking marker, got %q", (*m.pendingCommit)[2])
+	if !strings.Contains(strings.Join(m.transcript, "\n"), "thinking") {
+		t.Errorf("reasoning packet should show the thinking marker, got %v", m.transcript)
 	}
 }
 
@@ -296,7 +296,9 @@ func TestPasteMsgFoldsBeforeTextareaConsumesNewlines(t *testing.T) {
 func TestUnsendRestoresFoldedPastePlaceholder(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
-	m.pendingBubble = "expanded JSON"
+	m.bubbleStartIdx = len(m.transcript)
+	m.commitLine("")
+	m.commitLine(renderUserBubble("expanded JSON", m.width, m.planMode))
 	m.pendingRestore = "[Pasted text #1 · 5 lines] 这是什么?"
 	m.bubblePending = true
 	m.state = tuiRunning
@@ -306,8 +308,11 @@ func TestUnsendRestoresFoldedPastePlaceholder(t *testing.T) {
 	if got := m.input.Value(); got != "[Pasted text #1 · 5 lines] 这是什么?" {
 		t.Fatalf("restored input = %q", got)
 	}
-	if m.pendingBubble != "" || m.pendingRestore != "" || m.bubblePending {
-		t.Fatalf("pending state not cleared: bubble=%q restore=%q pending=%v", m.pendingBubble, m.pendingRestore, m.bubblePending)
+	if len(m.transcript) != m.bubbleStartIdx {
+		t.Fatalf("un-send should pop the echoed bubble, transcript=%v", m.transcript)
+	}
+	if m.pendingRestore != "" || m.bubblePending {
+		t.Fatalf("pending state not cleared: restore=%q pending=%v", m.pendingRestore, m.bubblePending)
 	}
 }
 

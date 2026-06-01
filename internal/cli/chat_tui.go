@@ -121,16 +121,16 @@ type chatTUI struct {
 	autoScroll int
 	dragX      int
 
-	// The user bubble for an in-flight turn is deferred, not echoed on Enter: it's
-	// held in pendingBubble and committed to scrollback only when the first
-	// response packet arrives (commitPendingBubble). Pressing Esc/Ctrl+C before
-	// then "un-sends" the message — its text returns to the input box and nothing
-	// reaches scrollback. bubblePending is true from startTurn until the bubble
-	// commits or is un-sent; turnDiscarded then swallows the turn's already-buffered
-	// events until its TurnDone settles.
-	pendingBubble  string
+	// The user bubble is echoed to scrollback immediately on Enter (bubbleStartIdx
+	// marks where in the transcript it landed). It stays "un-sendable" until the
+	// first response packet arrives: pressing Esc/Ctrl+C before then pops those
+	// lines back off the transcript and restores the text to the input box, leaving
+	// no trace. bubblePending is true from startTurn until the first packet confirms
+	// the send or it's un-sent; turnDiscarded then swallows the turn's
+	// already-buffered events until its TurnDone settles.
 	pendingRestore string
 	pendingPastes  []string
+	bubbleStartIdx int
 	bubblePending  bool
 	turnDiscarded  bool
 	// attachments are image refs queued for the next user turn. They render as a
@@ -1733,13 +1733,16 @@ func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatA
 	m.commitReasoning()
 	m.commitPending()
 
-	// Defer the user bubble until the first response packet (commitPendingBubble):
-	// pressing Esc before the server replies un-sends the message, restoring its
-	// text to the input box with nothing stranded in scrollback.
-	m.pendingBubble = displayed
+	// Echo the user bubble to scrollback now so it appears the instant Enter is
+	// pressed, not when the server's first packet lands. It stays un-sendable until
+	// then: Esc before the reply pops these lines back off (unsendPending) and
+	// restores the text to the input box, leaving nothing stranded.
 	m.pendingRestore = restore
 	m.pendingPastes = m.pasteLabelsIn(restore)
 	m.pendingAttachments = cloneAttachments(attachments)
+	m.bubbleStartIdx = len(m.transcript)
+	m.commitLine("") // blank line separating turns
+	m.commitLine(renderUserBubble(displayed, m.width, m.planMode))
 	m.bubblePending = true
 	m.turnDiscarded = false
 
@@ -1753,34 +1756,31 @@ func (m *chatTUI) startTurn(sent, displayed, restore string, attachments []chatA
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
-// commitPendingBubble flushes the deferred user bubble into scrollback — a blank
-// separator then the bubble. Called when a turn's first response packet arrives
-// (the message is now really sent) and, defensively, at turn end if it wasn't
-// un-sent. A no-op once committed.
-func (m *chatTUI) commitPendingBubble() {
+// confirmBubbleSent marks the already-echoed user bubble as really sent once a
+// turn's first response packet arrives, so Esc no longer un-sends it (it cancels
+// the stream instead). Also called defensively at turn end. A no-op once confirmed.
+func (m *chatTUI) confirmBubbleSent() {
 	if !m.bubblePending {
 		return
 	}
 	m.bubblePending = false
-	m.commitLine("") // blank line separating turns
-	m.commitLine(renderUserBubble(m.pendingBubble, m.width, m.planMode))
-	m.pendingBubble = ""
 	m.pendingRestore = ""
 	m.pendingAttachments = nil
 }
 
 // unsendPending "un-sends" the in-flight turn while the server hasn't replied yet
-// (bubblePending): it restores the just-sent text to the input box, drops the
-// deferred bubble, and cancels the request — marking the turn discarded so its
-// already-buffered events reach nothing. Once a packet has arrived the bubble is
-// committed and this path isn't taken (Esc cancels normally instead).
+// (bubblePending): it pops the echoed bubble back off the transcript, restores the
+// just-sent text to the input box, and cancels the request — marking the turn
+// discarded so its already-buffered events reach nothing. Once a packet has arrived
+// the bubble is confirmed and this path isn't taken (Esc cancels normally instead).
 func (m *chatTUI) unsendPending() {
 	m.input.SetValue(m.pendingRestore)
 	m.growInputToFit()
 	m.attachments = cloneAttachments(m.pendingAttachments)
 	m.pendingAttachments = nil
+	m.transcript = m.transcript[:m.bubbleStartIdx]
+	m.transcriptDirty = true
 	m.bubblePending = false
-	m.pendingBubble = ""
 	m.pendingRestore = ""
 	m.pendingPastes = nil
 	m.turnDiscarded = true
@@ -1802,11 +1802,11 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 		return
 	}
-	// The first packet of any kind means the server replied — commit the deferred
-	// user bubble before rendering it. TurnStarted is local (emitted before the
-	// request) and TurnDone is handled in its own case, so neither triggers it.
+	// The first packet of any kind means the server replied — confirm the send so
+	// Esc cancels the stream instead of un-sending. TurnStarted is local (emitted
+	// before the request) and TurnDone is handled in its own case.
 	if e.Kind != event.TurnStarted && e.Kind != event.TurnDone {
-		m.commitPendingBubble()
+		m.confirmBubbleSent()
 	}
 	switch e.Kind {
 	case event.Reasoning:
@@ -1911,19 +1911,10 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// real error, and gate a plan-mode proposal on the user's approval.
 		m.commitReasoning()
 		m.commitPending()
-		// If the bubble is still deferred at turn end, the message was sent but
-		// produced nothing visible (an error before any reply, or an empty turn):
-		// commit it so the user sees what they sent — unless this is a user cancel,
-		// where it was already un-sent (handled above) or should leave no trace.
-		if e.Err == nil || !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitPendingBubble()
-		} else {
-			m.bubblePending = false
-			m.pendingBubble = ""
-			m.pendingAttachments = nil
-			m.pendingRestore = ""
-			m.pendingPastes = nil
-		}
+		// The bubble was echoed on Enter and an un-sent turn is swallowed above
+		// (turnDiscarded), so any turn reaching here keeps its bubble in scrollback;
+		// just clear the un-sendable flag.
+		m.confirmBubbleSent()
 		m.state = tuiIdle
 		m.clearSubmittedPastes()
 		_ = m.ctrl.Snapshot() // best-effort; never the user's problem mid-chat
