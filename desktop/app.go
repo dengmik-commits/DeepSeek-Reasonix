@@ -1200,6 +1200,7 @@ type MemoryDoc struct {
 // MemoryFact is one saved auto-memory, surfaced read-only in the panel.
 type MemoryFact struct {
 	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
 	Description string `json:"description"`
 	Type        string `json:"type"`
 	Body        string `json:"body"`
@@ -1248,7 +1249,7 @@ func (a *App) Memory() MemoryView {
 	}
 	for _, f := range set.Store.List() {
 		view.Facts = append(view.Facts, MemoryFact{
-			Name: f.Name, Description: f.Description, Type: string(f.Type), Body: f.Body,
+			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
 		})
 	}
 	for _, sc := range writableScopes {
@@ -1270,6 +1271,18 @@ func (a *App) Remember(scope, note string) (string, error) {
 		return "", nil
 	}
 	return ctrl.QuickAdd(parseScope(scope), note)
+}
+
+// Forget deletes a saved auto-memory by name — the panel's delete action for a
+// fact the model owns. A no-op when no controller is attached.
+func (a *App) Forget(name string) error {
+	a.mu.RLock()
+	ctrl := a.ctrl
+	a.mu.RUnlock()
+	if ctrl == nil {
+		return nil
+	}
+	return ctrl.ForgetMemory(name)
 }
 
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
