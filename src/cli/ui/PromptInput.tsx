@@ -112,10 +112,13 @@ export function PromptInput({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const rafIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const throttlePendingRef = useRef(false);
   const onChangeThrottledRef = useRef((v: string) => {
     if (rafIdRef.current !== null) clearTimeout(rafIdRef.current);
+    throttlePendingRef.current = true;
     rafIdRef.current = setTimeout(() => {
       rafIdRef.current = null;
+      throttlePendingRef.current = false;
       onChangeRef.current(v);
     }, 16); // ≈ 60fps throttle, same cadence as requestAnimationFrame
   });
@@ -127,7 +130,12 @@ export function PromptInput({
   cursorRef.current = cursor;
   if (value !== lastLocalValueRef.current) {
     lastLocalValueRef.current = value;
-    if (cursor !== value.length) {
+    // Only reset cursor to end when the value change came from OUTSIDE
+    // (e.g. history recall, external editor).  When a throttled onChange
+    // is pending, the keystroke handler already set cursorRef correctly
+    // — jumping to `value.length` would undo the cursor position the
+    // user chose with arrow keys (#input-lag-fix).
+    if (!throttlePendingRef.current && cursor !== value.length) {
       cursorRef.current = value.length;
       setCursor(value.length);
     }
