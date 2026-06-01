@@ -105,23 +105,11 @@ export function PromptInput({
   // ASCII bursts rather than ordinary per-key input.
   const lastImeCommitInputAtRef = useRef(0);
 
-  // RAF throttle for onChange — rapid typing (IME commit or fast keyboard)
-  // dispatches multiple keystrokes per frame.  Coalescing into one dispatch
-  // per animation frame (~16ms) keeps React re-render rate at ≤60fps instead
-  // of potentially hundreds per second.
+  // Keystroke handler calls onChange directly.  No throttle needed — the
+  // real input-lag root cause (partition() re-running on every render) was
+  // fixed separately.  Direct dispatch avoids cursor/value desync (#cursor-fix).
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const rafIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const throttlePendingRef = useRef(false);
-  const onChangeThrottledRef = useRef((v: string) => {
-    if (rafIdRef.current !== null) clearTimeout(rafIdRef.current);
-    throttlePendingRef.current = true;
-    rafIdRef.current = setTimeout(() => {
-      rafIdRef.current = null;
-      throttlePendingRef.current = false;
-      onChangeRef.current(v);
-    }, 16); // ≈ 60fps throttle, same cadence as requestAnimationFrame
-  });
 
   // Refs (not props/state) — multiple keystrokes in one stdin chunk dispatch
   // before re-render, so the handler must read the latest value/cursor.
@@ -130,12 +118,7 @@ export function PromptInput({
   cursorRef.current = cursor;
   if (value !== lastLocalValueRef.current) {
     lastLocalValueRef.current = value;
-    // Only reset cursor to end when the value change came from OUTSIDE
-    // (e.g. history recall, external editor).  When a throttled onChange
-    // is pending, the keystroke handler already set cursorRef correctly
-    // — jumping to `value.length` would undo the cursor position the
-    // user chose with arrow keys (#input-lag-fix).
-    if (!throttlePendingRef.current && cursor !== value.length) {
+    if (cursor !== value.length) {
       cursorRef.current = value.length;
       setCursor(value.length);
     }
@@ -198,7 +181,7 @@ export function PromptInput({
     }
     if (action.next !== null) {
       lastLocalValueRef.current = action.next;
-      onChangeThrottledRef.current(action.next);
+      onChangeRef.current(action.next);
     }
     if (action.cursor !== null) {
       cursorRef.current = action.cursor;
