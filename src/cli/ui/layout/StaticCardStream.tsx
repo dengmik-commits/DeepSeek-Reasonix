@@ -78,7 +78,7 @@ function StaticCardRenderer({ card }: { card: Card }): React.ReactElement {
  *  catches up — keeps Static's append-only contract intact so chronological
  *  order is preserved. Gates the FULL cards array (not just the static partition)
  *  so an old unsettled live tail also drips while fresh cards bypass the gate. */
-function useProgressiveBacklog(cards: readonly Card[]): Card[] {
+function useProgressiveBacklog(cards: readonly Card[]): readonly Card[] {
   const backlogRef = useRef<number | null>(null);
   if (backlogRef.current === null && cards.length > 0) {
     backlogRef.current = cards.length;
@@ -102,7 +102,7 @@ function useProgressiveBacklog(cards: readonly Card[]): Card[] {
     return () => clearImmediate(handle);
   }, [draining, released, backlog]);
 
-  if (!draining) return cards.slice();
+  if (!draining) return cards;
   // Drop the held-back middle. Always include cards added AFTER the snapshot
   // (indices >= backlog) so new live activity isn't blocked by an old backlog.
   return cards.slice(0, released).concat(cards.slice(backlog));
