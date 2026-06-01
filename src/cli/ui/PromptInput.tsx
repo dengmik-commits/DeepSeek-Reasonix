@@ -105,6 +105,21 @@ export function PromptInput({
   // ASCII bursts rather than ordinary per-key input.
   const lastImeCommitInputAtRef = useRef(0);
 
+  // RAF throttle for onChange — rapid typing (IME commit or fast keyboard)
+  // dispatches multiple keystrokes per frame.  Coalescing into one dispatch
+  // per animation frame (~16ms) keeps React re-render rate at ≤60fps instead
+  // of potentially hundreds per second.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const rafIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChangeThrottledRef = useRef((v: string) => {
+    if (rafIdRef.current !== null) clearTimeout(rafIdRef.current);
+    rafIdRef.current = setTimeout(() => {
+      rafIdRef.current = null;
+      onChangeRef.current(v);
+    }, 16); // ≈ 60fps throttle, same cadence as requestAnimationFrame
+  });
+
   // Refs (not props/state) — multiple keystrokes in one stdin chunk dispatch
   // before re-render, so the handler must read the latest value/cursor.
   const lastLocalValueRef = useRef(value);
@@ -175,7 +190,7 @@ export function PromptInput({
     }
     if (action.next !== null) {
       lastLocalValueRef.current = action.next;
-      onChange(action.next);
+      onChangeThrottledRef.current(action.next);
     }
     if (action.cursor !== null) {
       cursorRef.current = action.cursor;

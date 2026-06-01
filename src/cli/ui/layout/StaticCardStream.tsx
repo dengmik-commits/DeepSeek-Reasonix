@@ -1,10 +1,11 @@
-import { Box, Static } from "ink";
+import { Box, Static, Text } from "ink";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import { useRenderTrace } from "../render-trace.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
 import { VerboseContext } from "../state/verbose-context.js";
+import { FG } from "../theme/tokens.js";
 
 interface StaticCardStreamProps {
   suppressLive?: boolean;
@@ -14,6 +15,13 @@ interface StaticCardStreamProps {
 const INITIAL_BATCH = 30;
 /** Each subsequent batch released after a yield to the event loop. */
 const PROGRESSIVE_BATCH = 30;
+/**
+ * Max settled cards rendered through `<Static>`. Beyond this window the DOM
+ * grows unbounded, slowing Ink's reconciliation on every keystroke-triggered
+ * re-render. Matches card-elision.ts RECENT_CARDS_WINDOW so recently-elided
+ * cards are still visible.
+ */
+const MAX_STATIC_CARDS = 200;
 
 function StaticCardStreamInner({
   suppressLive = false,
@@ -34,7 +42,11 @@ function StaticCardStreamInner({
       <Static items={staticItems}>
         {(card) => (
           <Box key={card.id} flexDirection="column" flexShrink={0}>
-            <StaticCardRenderer card={card} />
+            {(card as any).kind === "__collapsed__" ? (
+              <CollapsedMarker />
+            ) : (
+              <StaticCardRenderer card={card} />
+            )}
           </Box>
         )}
       </Static>
@@ -96,6 +108,20 @@ function useProgressiveBacklog(cards: readonly Card[]): Card[] {
   return cards.slice(0, released).concat(cards.slice(backlog));
 }
 
+/** Compact single-line summary for settled cards older than MAX_STATIC_CARDS.
+ *  Uses a static string (no dynamic count) because Ink's `<Static>` never
+ *  re-renders an item with the same key — a dynamic counter would freeze
+ *  at its first value. */
+function CollapsedMarker(): React.ReactElement {
+  return (
+    <Box flexDirection="column" flexShrink={0}>
+      <Box>
+        <Text color={FG.faint}>{"╎ earlier cards collapsed"}</Text>
+      </Box>
+    </Box>
+  );
+}
+
 export const StaticCardStream = React.memo(StaticCardStreamInner);
 StaticCardStream.displayName = "StaticCardStream";
 
@@ -106,15 +132,28 @@ function partition(cards: readonly Card[]): {
 } {
   // Settled cards are immutable terminal scrollback; verbose toggles only affect live/future cards.
   const firstDynamic = cards.findIndex((c) => !isFullySettled(c));
+  let staticItems: Card[];
+  let dynamicItems: Card[];
+  let hasUnsettledDynamic: boolean;
   if (firstDynamic === -1) {
-    return { staticItems: [...cards], dynamicItems: [], hasUnsettledDynamic: false };
+    staticItems = [...cards];
+    dynamicItems = [];
+    hasUnsettledDynamic = false;
+  } else {
+    dynamicItems = cards.slice(firstDynamic);
+    staticItems = cards.slice(0, firstDynamic);
+    hasUnsettledDynamic = dynamicItems.some((c) => !isFullySettled(c));
   }
-  const dynamicItems = cards.slice(firstDynamic);
-  return {
-    staticItems: cards.slice(0, firstDynamic),
-    dynamicItems,
-    hasUnsettledDynamic: dynamicItems.some((c) => !isFullySettled(c)),
-  };
+  // Virtualize: cap settled cards to MAX_STATIC_CARDS so DOM doesn't grow unbounded.
+  // Older cards beyond the window are replaced with a compact collapsed marker.
+  if (staticItems.length > MAX_STATIC_CARDS) {
+    const count = staticItems.length - MAX_STATIC_CARDS;
+    staticItems = [
+      { kind: "__collapsed__" as const, id: "__collapsed__" } as unknown as Card,
+      ...staticItems.slice(count),
+    ];
+  }
+  return { staticItems, dynamicItems, hasUnsettledDynamic };
 }
 
 function isFullySettled(card: Card): boolean {

@@ -28,12 +28,15 @@ export function createStore(session: SessionInfo, initialCards?: ReadonlyArray<C
   const scheduleNotify = () => {
     if (notifyScheduled) return;
     notifyScheduled = true;
-    // setTimeout(0) defers to the next macrotask, coalescing all synchronous
-    // dispatches (e.g. rapid streaming chunks) into a single notification.
+    // setTimeout(30) defers to the next macrotask AND sets a minimum interval
+    // (≈33 fps) so rapid streaming chunks (100+/sec) don't flood React with
+    // more re-renders than the terminal can flush. Combined with the macrotask
+    // coalescing, this drops render frequency from ~100/s to ~33/s with no
+    // perceptible UI lag.
     setTimeout(() => {
       notifyScheduled = false;
       for (const listener of stateListeners) listener();
-    }, 0);
+    }, 30);
   };
 
   return {
