@@ -6,16 +6,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"unicode/utf16"
 
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/tool"
 )
+
+const readFileBinaryPeek = 8 * 1024 // bytes scanned for NUL before full read
 
 func init() { tool.RegisterBuiltin(readFile{}) }
 
@@ -25,8 +26,7 @@ func init() { tool.RegisterBuiltin(readFile{}) }
 type readFile struct{ workDir string }
 
 const (
-	readFileDefaultLimit = 2000     // lines returned when limit is unset
-	readFileBinaryPeek   = 8 * 1024 // bytes scanned for a NUL to flag binary
+	readFileDefaultLimit = 2000 // lines returned when limit is unset
 )
 
 func (readFile) Name() string { return "read_file" }
@@ -82,58 +82,70 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	defer f.Close()
 
+	// Peek the first 8 KiB to reject binary files cheaply — the original
+	// implementation did this too, and it prevents a multi-GB archive or
+	// executable from being slurped into memory just to be discarded.
 	peek := make([]byte, readFileBinaryPeek)
 	n, _ := io.ReadFull(f, peek)
 	peek = peek[:n]
 
-	// A leading BOM marks encoded text whose bytes the NUL check below would
-	// otherwise misread: UTF-16 encodes ASCII as paired bytes with a 0x00 half,
-	// so a NUL is normal, not a binary signal. Decode such files to UTF-8 and
-	// scan that; only the BOM-less common case stays on the streaming path.
-	var src io.Reader = f
-	if enc := bomEncoding(peek); enc != encUTF8Plain {
+	// Check for a BOM first: UTF-16 files contain 0x00 for every ASCII
+	// character, so a naive NUL check would misidentify them as binary.
+	bomKind := fileenc.DetectQuick(peek)
+	if bomKind == fileenc.UTF16LE || bomKind == fileenc.UTF16BE || bomKind == fileenc.UTF8BOM {
 		rest, err := io.ReadAll(f)
 		if err != nil {
 			return "", fmt.Errorf("read %s: %w", p.Path, err)
 		}
-		src = bytes.NewReader(decodeBOM(append(peek, rest...), enc))
-	} else {
-		// Refuse binary files up front. A NUL byte anywhere in the leading 8 KB
-		// is the cheapest reliable signal for executables, archives, or images.
-		if bytes.IndexByte(peek, 0) >= 0 {
-			return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
-		}
-		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return "", fmt.Errorf("seek %s: %w", p.Path, err)
-		}
+		all := append(peek, rest...)
+		src := io.Reader(bytes.NewReader(fileenc.Decode(all, bomKind)))
+		return r.scan(src, p.Offset, p.Limit)
 	}
 
-	// Scan up to offset+limit+1 lines (the extra is just to know whether
-	// trimming a trailer is warranted). 1 MB per-line cap matches what other
-	// scanners in this package allow — well above any reasonable source line.
+	// No BOM — a NUL anywhere in the peek means binary.
+	if bytes.IndexByte(peek, 0) >= 0 {
+		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
+	}
+
+	// Non-BOM text: read the rest for full encoding detection (UTF-8 vs
+	// GB18030 vs lossy fallback). The peek already passed the NUL check
+	// so the remainder is unlikely to contain one, but check anyway.
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", p.Path, err)
+	}
+	all := append(peek, rest...)
+	enc, _ := fileenc.Detect(all)
+	if enc == fileenc.LossyUTF8 && bytes.IndexByte(all, 0) >= 0 {
+		return "", fmt.Errorf("binary file %s (NUL byte detected); use `bash hexdump` or another tool", p.Path)
+	}
+	src := io.Reader(bytes.NewReader(fileenc.Decode(all, enc)))
+	return r.scan(src, p.Offset, p.Limit)
+}
+
+// scan reads lines from src and returns the formatted output with line numbers.
+func (r readFile) scan(src io.Reader, offset, limit int) (string, error) {
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	upTo := p.Offset + p.Limit + 1
+	upTo := offset + limit + 1
 
 	var collected []string
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
-		if lineNo > p.Offset && len(collected) < p.Limit {
+		if lineNo > offset && len(collected) < limit {
 			collected = append(collected, scanner.Text())
 		}
 		if lineNo >= upTo {
-			// Keep counting to know how many more lines remain.
 			break
 		}
 	}
-	// Drain any remainder to learn the true total without buffering the rest.
 	remaining := 0
 	for scanner.Scan() {
 		remaining++
 	}
 	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("read %s: %w", p.Path, err)
+		return "", fmt.Errorf("scan: %w", err)
 	}
 	totalSeen := lineNo + remaining
 
@@ -141,64 +153,20 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "(empty file)", nil
 	}
 	if len(collected) == 0 {
-		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", p.Offset, totalSeen), nil
+		return fmt.Sprintf("(offset %d is past EOF — file has %d lines)", offset, totalSeen), nil
 	}
 
-	// Right-align line numbers to the largest one we'll print, so the arrow
-	// "→" column lines up. Add 1 for the 1-based display.
-	maxShown := p.Offset + len(collected)
+	maxShown := offset + len(collected)
 	w := len(fmt.Sprint(maxShown))
 
 	var b strings.Builder
 	for i, line := range collected {
-		fmt.Fprintf(&b, "%*d→%s\n", w, p.Offset+i+1, line)
+		fmt.Fprintf(&b, "%*d→%s\n", w, offset+i+1, line)
 	}
-	more := totalSeen - (p.Offset + len(collected))
+	more := totalSeen - (offset + len(collected))
 	if more > 0 {
 		fmt.Fprintf(&b, "\n[%d more line(s); pass offset=%d to continue]\n",
-			more, p.Offset+len(collected))
+			more, offset+len(collected))
 	}
 	return b.String(), nil
-}
-
-type bomKind int
-
-const (
-	encUTF8Plain bomKind = iota // no BOM (or none we special-case)
-	encUTF8BOM
-	encUTF16LE
-	encUTF16BE
-)
-
-func bomEncoding(b []byte) bomKind {
-	switch {
-	case len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF:
-		return encUTF8BOM
-	case len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE:
-		return encUTF16LE
-	case len(b) >= 2 && b[0] == 0xFE && b[1] == 0xFF:
-		return encUTF16BE
-	}
-	return encUTF8Plain
-}
-
-// decodeBOM strips a UTF-8 BOM or decodes UTF-16 to UTF-8, given the kind
-// bomEncoding already identified from the same leading bytes.
-func decodeBOM(b []byte, enc bomKind) []byte {
-	switch enc {
-	case encUTF8BOM:
-		return b[3:]
-	case encUTF16LE, encUTF16BE:
-		order := binary.ByteOrder(binary.LittleEndian)
-		if enc == encUTF16BE {
-			order = binary.BigEndian
-		}
-		b = b[2:]
-		u := make([]uint16, 0, len(b)/2)
-		for i := 0; i+1 < len(b); i += 2 {
-			u = append(u, order.Uint16(b[i:i+2]))
-		}
-		return []byte(string(utf16.Decode(u)))
-	}
-	return b
 }

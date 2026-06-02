@@ -13,6 +13,9 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/text/transform"
+
+	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/tool"
 )
 
@@ -77,7 +80,56 @@ func (g grepTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 		}
 		defer f.Close()
 
-		sc := bufio.NewScanner(f)
+		// Peek the first 8 KiB to reject binaries cheaply without reading
+		// the entire file into memory. Check BOM first (UTF-16 files have
+		// 0x00 for ASCII), then NUL.
+		peek := make([]byte, 8*1024)
+		n, _ := io.ReadFull(f, peek)
+		peek = peek[:n]
+
+		bomKind := fileenc.DetectQuick(peek)
+		if bomKind != fileenc.UTF16LE && bomKind != fileenc.UTF16BE && bomKind != fileenc.UTF8BOM {
+			if bytes.IndexByte(peek, 0) >= 0 {
+				return nil // binary, skip
+			}
+		}
+
+		// Detect encoding from the peek alone — sufficient for the
+		// UTF-8 vs GB18030 distinction (utf8.Valid on 8 KiB is reliable).
+		// Then stream the rest through a decoder so the 200-match cap can
+		// stop reading early instead of buffering the entire file.
+		enc, _ := fileenc.Detect(peek)
+
+		var src io.Reader
+		if enc == fileenc.UTF16LE || enc == fileenc.UTF16BE {
+			// UTF-16 needs full-file decode (multi-byte units span the
+			// whole stream). These files are rare in grep targets.
+			rest, err := io.ReadAll(f)
+			if err != nil {
+				return nil
+			}
+			all := append(peek, rest...)
+			src = bytes.NewReader(fileenc.Decode(all, enc))
+		} else {
+			// Non-BOM path: stream. The peek bytes are prepended via
+			// io.MultiReader; the remaining bytes flow through a decoder
+			// pipe so the scanner can stop as soon as the cap is reached.
+			dec := fileenc.Decoder(enc)
+			if dec != nil {
+				pr, pw := io.Pipe()
+				go func() {
+					pw.Write(peek)
+					io.Copy(pw, f) //nolint:errcheck
+					pw.Close()
+				}()
+				src = transform.NewReader(pr, dec)
+			} else {
+				// UTF-8 or LossyUTF8 — no transformation needed.
+				src = io.MultiReader(bytes.NewReader(peek), f)
+			}
+		}
+
+		sc := bufio.NewScanner(src)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		ln := 0
 		for sc.Scan() {
